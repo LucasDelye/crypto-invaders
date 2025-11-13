@@ -95,3 +95,24 @@ main {
   color: var(--liClr);
   cursor:pointer;
 }
+
+#gameRetryBtn{
+  display: inline-block;
+  width: 100px;
+  padding:8px 15px;
+  margin: 20px 0;
+  text-align: center;
+  font-family: inherit;
+  border-radius: 10px;
+}
+
+#gameRetryBtn p{
+  margin-top: 0;
+}
+
+#gameRetryBtn:hover{
+  background-color: var(--dkClr);
+  border: 0.5px solid var(--liClr);
+  color: var(--liClr);
+  cursor:pointer;
+}
