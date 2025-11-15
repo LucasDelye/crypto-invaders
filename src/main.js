@@ -17,14 +17,34 @@ const BULLET_SPEED = 500
 const ENEMY_BULLET_SPEED = 200 // Slower than player bullets
 const ENEMY_HORIZONTAL_SPEED = 30 // Start slow
 const ENEMY_DOWN_STEP = 20 // Small downward step when hitting edge
-const ENEMY_SPEED_INCREASE = 2 // Small speed increase each reversal
 const ENEMY_SHOOT_INTERVAL = 5000 // 5 seconds in milliseconds
-const PLAYER_SHOOT_INTERVAL = 1000 // 1 second in milliseconds
+const PLAYER_SHOOT_INTERVAL = 750 // 0.75 second in milliseconds
 const ENEMY_ROWS = 5
 const ENEMY_COLS = 6
 const ENEMY_SPACING = 50 // Reduced spacing to keep enemies closer together
 const BULLET_WIDTH = 5
 const BULLET_HEIGHT = 15
+
+// ========================================
+// DIFFICULTY CONFIGURATION
+// ========================================
+// Percentage of eligible enemies that will shoot (0.0 to 1.0)
+// Example: 0.3 means 30% of enemies that can shoot will actually shoot
+const DIFFICULTY_ENEMY_SHOOT_PERCENTAGE = 0.1
+
+// Speed increase when enemies reverse direction (descent speed increase)
+// This value is added to enemy speed each time they hit an edge and reverse
+const DIFFICULTY_ENEMY_SPEED_INCREASE = 0.5
+
+// Number of super aliens per row
+// Starts at 1, increases by 1 every time the threshold is reached
+// Number of spawned lines before super alien count increases by 1
+const DIFFICULTY_SUPER_ALIENS_INCREASE_AFTER_LINES = 5
+
+// Power-up configuration
+const POWERUP_SPAWN_AFTER_ROWS = 10 // Spawn power-up after this many rows
+const POWERUP_DURATION = 10000 // Power-up duration in milliseconds (10 seconds)
+const POWERUP_SIZE = 20 // Size of the power-up box
 
 const gameStartDiv = document.querySelector('#gameStartDiv')
 const gameStartBtn = document.querySelector('#gameStartBtn')
@@ -52,6 +72,16 @@ class GameScene extends Phaser.Scene {
     this.rowsCanShoot = new Set() // Track which rows can shoot
     this.rowShooting = null // Track which row is currently shooting (to prevent two in same row)
     this.playerHitProcessing = false // Prevent multiple simultaneous hits
+    this.lastSpawnedRowY = null // Track Y position of the last spawned row
+    this.nextRowIndex = 0 // Track the next row index to spawn
+    this.lastSpawnCheckY = null // Track Y position when we last checked for spawning
+    this.rowLastShotTime = new Map() // Track when each row last shot (for staggered shooting)
+    this.minTimeBetweenRowShots = 800 // Minimum time between different rows shooting (in ms)
+    this.spawnedRowCount = 0 // Track how many rows have been spawned (for super alien logic)
+    this.powerUp = null // Current power-up on screen
+    this.playerDoubleShot = false // Whether player has double shot power-up active
+    this.powerUpEndTime = 0 // When the power-up expires
+    this.lastPowerUpSpawnRow = 0 // Track which row count we last spawned a power-up at
   }
 
   // ========================================
@@ -143,46 +173,20 @@ class GameScene extends Phaser.Scene {
     // Row 0 (bottom row, closest to player) spawns at 10% from top
     const bottomRowY = sizes.height * 0.1
 
-    // Pre-generate random super alien positions for each row (one per row)
+    // Pre-generate random super alien positions for each row (one per row initially)
     const superAlienPositions = []
     for (let row = 0; row < ENEMY_ROWS; row++) {
       // Randomly select one column per row to be a super alien
-      superAlienPositions[row] = Phaser.Math.Between(0, ENEMY_COLS - 1)
+      superAlienPositions[row] = [Phaser.Math.Between(0, ENEMY_COLS - 1)]
     }
 
     for (let row = 0; row < ENEMY_ROWS; row++) {
-      for (let col = 0; col < ENEMY_COLS; col++) {
-        const x = startX + col * ENEMY_SPACING
-        // Row 0 is bottom row (closest to player), spawns at bottomRowY (10% from top)
-        // Higher row numbers are higher up (smaller y values)
-        const y = bottomRowY - row * 50
-        
-        // Determine if this is a super alien - one random position per row
-        const isSuperAlien = superAlienPositions[row] === col
-        const enemyKey = isSuperAlien ? 'superAlien' : 'alien'
-        
-        // Create image with physics directly
-        const enemy = this.physics.add.image(x, y, enemyKey)
-          .setOrigin(0.5, 0.5)
-          .setScale(scale * 0.75) // Scale relative to resolution
-        
-        // Configure physics body to prevent falling (same as player)
-        enemy.body.setGravityY(0)
-        enemy.body.allowGravity = false
-        enemy.body.setVelocity(0, 0)
-        enemy.body.setCollideWorldBounds(false)
-        // Let Phaser automatically calculate body size from scaled sprite (like player)
-        
-        // Set custom properties
-        enemy.isAlive = true
-        enemy.row = row // Store row index for shooting logic
-        enemy.isSuperAlien = isSuperAlien
-        enemy.lastShotTime = 0 // Track when this enemy last shot
-        
-        // Add to array only - no group
-        this.enemies.push(enemy)
-      }
+      this.spawnEnemyRow(row, startX, bottomRowY, superAlienPositions[row])
     }
+    
+    // Track the last spawned row Y position (topmost row)
+    this.lastSpawnedRowY = bottomRowY - (ENEMY_ROWS - 1) * 50
+    this.nextRowIndex = ENEMY_ROWS
     
     // Initialize all rows as able to shoot
     for (let i = 0; i < ENEMY_ROWS; i++) {
@@ -196,10 +200,161 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  spawnEnemyRow(rowIndex, startX, bottomRowY, superAlienPositions) {
+    // Calculate Y position for this row
+    // Row 0 is bottom row (closest to player), spawns at bottomRowY (10% from top)
+    // Higher row numbers are higher up (smaller y values)
+    const y = bottomRowY - rowIndex * 50
+    
+    // Handle super alien positions - can be array or single value
+    const superAlienCols = Array.isArray(superAlienPositions) 
+      ? superAlienPositions 
+      : (superAlienPositions !== undefined ? [superAlienPositions] : [Phaser.Math.Between(0, ENEMY_COLS - 1)])
+    
+    for (let col = 0; col < ENEMY_COLS; col++) {
+      const x = startX + col * ENEMY_SPACING
+      
+      // Determine if this is a super alien - check if col is in superAlienCols array
+      const isSuperAlien = superAlienCols.includes(col)
+      const enemyKey = isSuperAlien ? 'superAlien' : 'alien'
+      
+      // Create image with physics directly
+      const enemy = this.physics.add.image(x, y, enemyKey)
+        .setOrigin(0.5, 0.5)
+        .setScale(scale * 0.75) // Scale relative to resolution
+      
+      // Configure physics body to prevent falling (same as player)
+      enemy.body.setGravityY(0)
+      enemy.body.allowGravity = false
+      enemy.body.setVelocity(0, 0)
+      enemy.body.setCollideWorldBounds(false)
+      // Let Phaser automatically calculate body size from scaled sprite (like player)
+      
+      // Set custom properties
+      enemy.isAlive = true
+      enemy.row = rowIndex // Store row index for shooting logic
+      enemy.isSuperAlien = isSuperAlien
+      enemy.lastShotTime = 0 // Track when this enemy last shot
+      
+      // Add to array only - no group
+      this.enemies.push(enemy)
+    }
+    
+    // Update last spawned row Y position
+    this.lastSpawnedRowY = y
+  }
+
+  spawnEnemyRowCentered(rowIndex, startX, y, superAlienPositions) {
+    // Spawn a row at a specific Y position with proper centering
+    // Handle super alien positions - should be an array
+    const superAlienCols = Array.isArray(superAlienPositions) 
+      ? superAlienPositions 
+      : (superAlienPositions !== undefined ? [superAlienPositions] : [Phaser.Math.Between(0, ENEMY_COLS - 1)])
+    
+    for (let col = 0; col < ENEMY_COLS; col++) {
+      const x = startX + col * ENEMY_SPACING
+      
+      // Determine if this is a super alien - check if col is in superAlienCols array
+      const isSuperAlien = superAlienCols.includes(col)
+      const enemyKey = isSuperAlien ? 'superAlien' : 'alien'
+      
+      // Create image with physics directly
+      const enemy = this.physics.add.image(x, y, enemyKey)
+        .setOrigin(0.5, 0.5)
+        .setScale(scale * 0.75) // Scale relative to resolution
+      
+      // Configure physics body to prevent falling (same as player)
+      enemy.body.setGravityY(0)
+      enemy.body.allowGravity = false
+      enemy.body.setVelocity(0, 0)
+      enemy.body.setCollideWorldBounds(false)
+      
+      // Set custom properties
+      enemy.isAlive = true
+      enemy.row = rowIndex // Store row index for shooting logic
+      enemy.isSuperAlien = isSuperAlien
+      enemy.lastShotTime = 0 // Track when this enemy last shot
+      
+      // Add to array only - no group
+      this.enemies.push(enemy)
+    }
+    
+    // Update last spawned row Y position
+    this.lastSpawnedRowY = y
+  }
+
   createBullets() {
     // Create groups for bullets - we'll create physics rectangles when shooting
     this.playerBullets = this.physics.add.group()
     this.enemyBullets = this.physics.add.group()
+  }
+
+  spawnPowerUp() {
+    // Don't spawn if there's already a power-up on screen
+    if (this.powerUp && this.powerUp.active) return
+    
+    // Spawn power-up at player's Y level, random X position
+    const playerY = this.player.y
+    const powerUpX = Phaser.Math.Between(POWERUP_SIZE, sizes.width - POWERUP_SIZE)
+    
+    // Create white box power-up
+    this.powerUp = this.add.rectangle(
+      powerUpX,
+      playerY,
+      POWERUP_SIZE,
+      POWERUP_SIZE,
+      0xffffff, // White
+      1
+    )
+    
+    // Add physics to power-up
+    this.physics.add.existing(this.powerUp)
+    if (this.powerUp.body) {
+      this.powerUp.body.enable = true
+      this.powerUp.body.setSize(POWERUP_SIZE, POWERUP_SIZE)
+      this.powerUp.body.setVelocity(0, 0) // Power-up doesn't move
+      this.powerUp.body.allowGravity = false
+    }
+    
+    // Setup collision with player
+    this.physics.add.overlap(
+      this.player,
+      this.powerUp,
+      this.collectPowerUp,
+      null,
+      this
+    )
+    
+    // Add pulsing animation to make it more visible
+    this.tweens.add({
+      targets: this.powerUp,
+      alpha: 0.5,
+      duration: 500,
+      yoyo: true,
+      repeat: -1
+    })
+  }
+
+  collectPowerUp(player, powerUp) {
+    if (!powerUp || !powerUp.active) return
+    
+    // Destroy the power-up
+    powerUp.destroy()
+    this.powerUp = null
+    
+    // Activate double shot
+    this.playerDoubleShot = true
+    this.powerUpEndTime = this.time.now + POWERUP_DURATION
+    
+    // Visual feedback (optional - could add sound or text here)
+    console.log('Power-up collected! Double shot activated for 10 seconds')
+  }
+
+  checkPowerUpExpiration() {
+    if (this.playerDoubleShot && this.time.now >= this.powerUpEndTime) {
+      this.playerDoubleShot = false
+      console.log('Double shot power-up expired')
+    }
   }
 
   setupCollisions() {
@@ -267,6 +422,8 @@ class GameScene extends Phaser.Scene {
     this.handleEnemyMovement()
     this.handleEnemyShooting()
     this.cleanupBullets()
+    this.checkSpawnNewRow()
+    this.checkPowerUpExpiration()
     this.checkGameOver()
   }
 
@@ -303,28 +460,76 @@ class GameScene extends Phaser.Scene {
     if (timeSinceLastShot >= PLAYER_SHOOT_INTERVAL) {
       this.playerShootTimer = currentTime
       
-      // Shoot automatically (limit to 3 bullets on screen)
+      // Shoot automatically (limit based on double shot)
+      const maxBullets = this.playerDoubleShot ? 6 : 3 // Allow more bullets with double shot
       const activeBullets = this.playerBullets.children.size
-      if (activeBullets < 3) {
-        // Create a rectangular bullet - create rectangle first, then enable physics
-        const bullet = this.add.rectangle(
-          this.player.x, 
-          this.player.y - (this.player.height * this.player.scaleY) / 2 - 10, 
-          BULLET_WIDTH, 
-          BULLET_HEIGHT, 
-          0x00ffff, 
-          1
-        )
-        this.physics.add.existing(bullet)
-        // Add to group first
-        this.playerBullets.add(bullet)
-        // Ensure body is enabled and configured
-        if (bullet.body) {
-          bullet.body.enable = true
-          bullet.body.setSize(BULLET_WIDTH, BULLET_HEIGHT)
-          bullet.body.setVelocityY(-BULLET_SPEED)
-          bullet.body.allowGravity = false
-          bullet.body.setGravityY(0)
+      
+      if (this.playerDoubleShot) {
+        // Double shot - shoot two bullets side by side
+        if (activeBullets < maxBullets) {
+          // First bullet (left)
+          const bullet1 = this.add.rectangle(
+            this.player.x - 10, 
+            this.player.y - (this.player.height * this.player.scaleY) / 2 - 10, 
+            BULLET_WIDTH, 
+            BULLET_HEIGHT, 
+            0xffffff, // White player bullets 
+            1
+          )
+          this.physics.add.existing(bullet1)
+          this.playerBullets.add(bullet1)
+          if (bullet1.body) {
+            bullet1.body.enable = true
+            bullet1.body.setSize(BULLET_WIDTH, BULLET_HEIGHT)
+            bullet1.body.setVelocityY(-BULLET_SPEED)
+            bullet1.body.allowGravity = false
+            bullet1.body.setGravityY(0)
+          }
+          
+          // Second bullet (right) - only if we have room
+          if (activeBullets + 1 < maxBullets) {
+            const bullet2 = this.add.rectangle(
+              this.player.x + 10, 
+              this.player.y - (this.player.height * this.player.scaleY) / 2 - 10, 
+              BULLET_WIDTH, 
+              BULLET_HEIGHT, 
+              0xffffff, // White player bullets 
+              1
+            )
+            this.physics.add.existing(bullet2)
+            this.playerBullets.add(bullet2)
+            if (bullet2.body) {
+              bullet2.body.enable = true
+              bullet2.body.setSize(BULLET_WIDTH, BULLET_HEIGHT)
+              bullet2.body.setVelocityY(-BULLET_SPEED)
+              bullet2.body.allowGravity = false
+              bullet2.body.setGravityY(0)
+            }
+          }
+        }
+      } else {
+        // Single shot
+        if (activeBullets < maxBullets) {
+          // Create a rectangular bullet - create rectangle first, then enable physics
+          const bullet = this.add.rectangle(
+            this.player.x, 
+            this.player.y - (this.player.height * this.player.scaleY) / 2 - 10, 
+            BULLET_WIDTH, 
+            BULLET_HEIGHT, 
+            0xffffff, // White player bullets 
+            1
+          )
+          this.physics.add.existing(bullet)
+          // Add to group first
+          this.playerBullets.add(bullet)
+          // Ensure body is enabled and configured
+          if (bullet.body) {
+            bullet.body.enable = true
+            bullet.body.setSize(BULLET_WIDTH, BULLET_HEIGHT)
+            bullet.body.setVelocityY(-BULLET_SPEED)
+            bullet.body.allowGravity = false
+            bullet.body.setGravityY(0)
+          }
         }
       }
     }
@@ -386,7 +591,7 @@ class GameScene extends Phaser.Scene {
 
     if (shouldReverse) {
       this.enemyDirection *= -1
-      this.enemySpeed += ENEMY_SPEED_INCREASE // Increase speed slightly each time they reverse
+      this.enemySpeed += DIFFICULTY_ENEMY_SPEED_INCREASE // Increase speed based on difficulty setting
     }
 
     // Move all alive enemies - only horizontal movement, no vertical velocity
@@ -430,54 +635,91 @@ class GameScene extends Phaser.Scene {
     const timeSinceLastShot = currentTime - this.enemyShootTimer
     if (timeSinceLastShot >= ENEMY_SHOOT_INTERVAL) {
       this.enemyShootTimer = currentTime
-      // Reset all rows to be able to shoot
+      // Reset all rows to be able to shoot - check all rows dynamically
       this.rowsCanShoot.clear()
-      for (let i = 0; i < ENEMY_ROWS; i++) {
-        // Only add rows that have alive enemies
-        const rowHasAliveEnemies = this.enemies.some(e => e.isAlive && e.row === i)
-        if (rowHasAliveEnemies) {
-          this.rowsCanShoot.add(i)
+      // Get all unique row indices from alive enemies
+      const aliveEnemyRows = new Set()
+      for (let enemy of this.enemies) {
+        if (enemy.isAlive) {
+          aliveEnemyRows.add(enemy.row)
         }
       }
+      // Add all rows with alive enemies
+      aliveEnemyRows.forEach(row => {
+        this.rowsCanShoot.add(row)
+      })
       this.rowShooting = null // Reset current shooting row
     }
 
     // Only allow one row to shoot at a time (prevents two in same row)
     if (this.rowShooting !== null) return
 
-    // Find enemies that can shoot (in rows that can shoot)
+    // Find enemies that can shoot (in rows that can shoot and haven't shot recently)
     const enemiesReadyToShoot = this.enemies.filter(enemy => {
-      if (!enemy.isAlive) return false
+      if (!enemy || !enemy.isAlive) return false
+      if (!enemy.active) return false // Check if enemy is still active (not destroyed)
       if (!this.rowsCanShoot.has(enemy.row)) return false
+      
+      // Check if this row shot recently (staggered shooting)
+      const lastShotTime = this.rowLastShotTime.get(enemy.row) || 0
+      const timeSinceRowShot = currentTime - lastShotTime
+      if (timeSinceRowShot < this.minTimeBetweenRowShots) {
+        return false // This row shot too recently
+      }
+      
       return true
     })
 
     if (enemiesReadyToShoot.length > 0) {
-      // Pick a random enemy from ready enemies
-      const shootingEnemy = Phaser.Utils.Array.GetRandom(enemiesReadyToShoot)
+      // Apply difficulty percentage: only allow a percentage of eligible enemies to shoot
+      const numEnemiesThatCanShoot = Math.max(1, Math.floor(enemiesReadyToShoot.length * DIFFICULTY_ENEMY_SHOOT_PERCENTAGE))
+      
+      // Randomly select from eligible enemies based on percentage
+      // Shuffle the array to randomize which enemies can shoot
+      const shuffledEnemies = [...enemiesReadyToShoot]
+      for (let i = shuffledEnemies.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledEnemies[i], shuffledEnemies[j]] = [shuffledEnemies[j], shuffledEnemies[i]]
+      }
+      const enemiesToChooseFrom = shuffledEnemies.slice(0, numEnemiesThatCanShoot)
+      
+      // Pick a random enemy from the filtered list
+      const shootingEnemy = Phaser.Utils.Array.GetRandom(enemiesToChooseFrom)
       this.rowShooting = shootingEnemy.row
+      
+      // Record when this row shot
+      this.rowLastShotTime.set(shootingEnemy.row, currentTime)
       
       // Shoot from this enemy
       this.shootFromEnemy(shootingEnemy)
       
-      // Reset rowShooting after a short delay to allow other rows to shoot
-      this.time.delayedCall(100, () => {
+      // Reset rowShooting after a delay to allow other rows to shoot
+      // Use a longer delay to ensure staggered shooting
+      this.time.delayedCall(this.minTimeBetweenRowShots, () => {
         this.rowShooting = null
       })
     }
   }
 
   shootFromEnemy(enemy) {
+    // Check if enemy is still valid before shooting
+    if (!enemy || !enemy.active || !enemy.isAlive) return
+    
+    // Calculate bullet spawn position at the bottom of the enemy sprite
+    // Enemy origin is 0.5, 0.5, so enemy.y is the center
+    const enemyHeight = enemy.height * enemy.scaleY
+    const bulletSpawnY = enemy.y + (enemyHeight / 2) + 5 // Spawn just below the enemy sprite
+    
     if (enemy.isSuperAlien) {
       // Super alien shoots double shot
       // First bullet
       if (this.enemyBullets.children.size < 28) {
         const bullet1 = this.add.rectangle(
           enemy.x - 10, 
-          enemy.y + 20, 
+          bulletSpawnY, 
           BULLET_WIDTH, 
           BULLET_HEIGHT, 
-          0xffff00, 
+          0xff0000, // Red enemy bullets 
           1
         )
         this.physics.add.existing(bullet1)
@@ -497,10 +739,10 @@ class GameScene extends Phaser.Scene {
       if (this.enemyBullets.children.size < 29) {
         const bullet2 = this.add.rectangle(
           enemy.x + 10, 
-          enemy.y + 20, 
+          bulletSpawnY, 
           BULLET_WIDTH, 
           BULLET_HEIGHT, 
-          0xffff00, 
+          0xff0000, // Red enemy bullets 
           1
         )
         this.physics.add.existing(bullet2)
@@ -520,10 +762,10 @@ class GameScene extends Phaser.Scene {
       if (this.enemyBullets.children.size < 29) {
         const bullet = this.add.rectangle(
           enemy.x, 
-          enemy.y + 20, 
+          bulletSpawnY, 
           BULLET_WIDTH, 
           BULLET_HEIGHT, 
-          0xffff00, 
+          0xff0000, // Red enemy bullets 
           1
         )
         this.physics.add.existing(bullet)
@@ -563,23 +805,185 @@ class GameScene extends Phaser.Scene {
     enemyBulletsToRemove.forEach(bullet => bullet.destroy())
   }
 
+  checkSpawnNewRow() {
+    // Only spawn new rows if player still has lives
+    if (this.lives <= 0) return
+    if (this.lastSpawnedRowY === null) return
+    
+    // Find the topmost alive enemy to determine the last spawned row position
+    let topmostEnemyY = null
+    for (let enemy of this.enemies) {
+      if (!enemy || !enemy.isAlive || !enemy.active) continue
+      if (topmostEnemyY === null || enemy.y < topmostEnemyY) {
+        topmostEnemyY = enemy.y
+      }
+    }
+    
+    // If no alive enemies, don't spawn
+    if (topmostEnemyY === null) return
+    
+    // Spawn new row 50 pixels above the topmost row to maintain same spacing as original rows
+    // We spawn when the topmost row is 100 pixels above the top of the screen (Y = -100)
+    const spawnThreshold = -100 // Spawn when topmost row reaches 100 pixels above screen top
+    const rowSpacing = 50 // Same spacing as original rows (50 pixels between rows)
+    
+    // Check if we should spawn: topmost row is at or above the threshold (100 pixels above screen)
+    // This ensures we always have enemies near the top of the screen
+    const shouldSpawn = topmostEnemyY >= spawnThreshold && 
+                       (this.lastSpawnCheckY === null || topmostEnemyY > this.lastSpawnCheckY)
+    
+    if (shouldSpawn) {
+      // Get the startX from an existing enemy to ensure perfect alignment
+      // Find the leftmost enemy in the topmost row to get the exact startX
+      let leftmostEnemy = null
+      for (let enemy of this.enemies) {
+        if (!enemy.isAlive) continue
+        if (Math.abs(enemy.y - topmostEnemyY) < 1) { // Allow small floating point differences
+          if (leftmostEnemy === null || enemy.x < leftmostEnemy.x) {
+            leftmostEnemy = enemy
+          }
+        }
+      }
+      
+      // Calculate startX using the same method as initial spawn
+      // If we found a reference enemy, we can verify alignment, but use calculation for consistency
+      const sidePadding = 20
+      const formationWidth = (ENEMY_COLS - 1) * ENEMY_SPACING
+      let startX = sidePadding + (sizes.width - formationWidth - (sidePadding * 2)) / 2
+      
+      // If we have a reference enemy, use its position to ensure perfect alignment
+      // Find which column the leftmost enemy is in and adjust startX accordingly
+      if (leftmostEnemy) {
+        // Find all enemies in the topmost row to determine column positions
+        const topRowEnemies = []
+        for (let enemy of this.enemies) {
+          if (!enemy.isAlive) continue
+          if (Math.abs(enemy.y - topmostEnemyY) < 1) {
+            topRowEnemies.push(enemy)
+          }
+        }
+        
+        // Sort by X position to find the leftmost
+        topRowEnemies.sort((a, b) => a.x - b.x)
+        
+        if (topRowEnemies.length > 0) {
+          // Use the leftmost enemy's X position as the reference
+          // Calculate what startX should be based on the leftmost enemy's position
+          // The leftmost enemy should be at startX (column 0)
+          startX = topRowEnemies[0].x
+        }
+      }
+      
+      // Spawn new row 50 pixels above the topmost row to maintain same spacing as original rows
+      const newRowY = topmostEnemyY - rowSpacing
+      
+      // Determine number of super aliens based on spawned row count and difficulty settings
+      // Starts at 1, increases by 1 every time the threshold is reached
+      // Example: if threshold is 5, then lines 0-4 have 1, lines 5-9 have 2, lines 10-14 have 3, etc.
+      const numSuperAliens = 1 + Math.floor(this.spawnedRowCount / DIFFICULTY_SUPER_ALIENS_INCREASE_AFTER_LINES)
+      
+      // Generate random super alien positions for this row
+      // Use a proper shuffle to ensure truly random positions
+      const superAlienPositions = []
+      const availableCols = Array.from({length: ENEMY_COLS}, (_, i) => i)
+      
+      // Shuffle the available columns array to randomize selection
+      for (let i = availableCols.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [availableCols[i], availableCols[j]] = [availableCols[j], availableCols[i]]
+      }
+      
+      // Take the first numSuperAliens columns from the shuffled array
+      for (let i = 0; i < numSuperAliens && i < availableCols.length; i++) {
+        superAlienPositions.push(availableCols[i])
+      }
+      
+      // Spawn the new row with proper centering
+      this.spawnEnemyRowCentered(this.nextRowIndex, startX, newRowY, superAlienPositions)
+      
+      this.lastSpawnedRowY = newRowY
+      // Track the topmost enemy Y when we spawned - this helps us know when to spawn again
+      // We'll spawn again when the topmost enemy moves down by at least rowSpacing
+      this.lastSpawnCheckY = topmostEnemyY
+      this.spawnedRowCount++
+      
+      // Check if we should spawn a power-up (every 10 rows)
+      // Only spawn if we haven't already spawned one for this row count
+      if (this.spawnedRowCount % POWERUP_SPAWN_AFTER_ROWS === 0 && 
+          this.spawnedRowCount !== this.lastPowerUpSpawnRow) {
+        this.spawnPowerUp()
+        this.lastPowerUpSpawnRow = this.spawnedRowCount
+      }
+      
+      // Add this row to the shooting system
+      this.rowsCanShoot.add(this.nextRowIndex)
+      
+      // Get the newly spawned enemies
+      const newRowEnemies = this.enemies.filter(e => e.row === this.nextRowIndex)
+      
+      // Setup collisions for new enemies
+      newRowEnemies.forEach(enemy => {
+        if (enemy && enemy.active) {
+          this.physics.add.overlap(
+            this.playerBullets,
+            enemy,
+            this.hitEnemy,
+            null,
+            this
+          )
+        }
+      })
+      
+      // Set initial velocity for new enemies
+      newRowEnemies.forEach(enemy => {
+        if (enemy.isAlive && enemy.body) {
+          if (!enemy.body.enable) {
+            enemy.body.enable = true
+          }
+          enemy.setVelocityX(this.enemyDirection * this.enemySpeed)
+          enemy.setVelocityY(0)
+          enemy.body.setGravityY(0)
+          enemy.body.allowGravity = false
+        }
+      })
+      
+      this.nextRowIndex++
+    }
+  }
+
+  checkPowerUpSpawn() {
+    // Power-up spawning is handled in checkSpawnNewRow when rows are spawned
+    // This method is called in update loop but doesn't need to do anything here
+    // as spawning is triggered by row spawning
+  }
+
   checkGameOver() {
     // Check if any enemy reached player's line
+    // Player is at 75% from top (sizes.height * 0.75) with origin at center (0.5, 0.5)
+    // So player.y is the center of the sprite
+    if (!this.player) return
+    
+    const playerY = this.player.y // Use actual player Y position
+    const playerHeight = this.player.height * this.player.scaleY
+    // Player bottom = center + half height
+    const playerBottom = playerY + (playerHeight / 2)
+    // Game over when enemy reaches near the bottom of the player (with small margin)
+    const gameOverThreshold = playerBottom - 10 // 10 pixels margin above player bottom
+    
     for (let enemy of this.enemies) {
       if (!enemy.isAlive) continue
-      if (enemy.y >= sizes.height - 100) {
+      if (!enemy.active) continue
+      // Check if enemy has reached the player's area
+      // Since enemy origin is also 0.5, 0.5, enemy.y is center, so check enemy bottom
+      const enemyHeight = enemy.height * enemy.scaleY
+      const enemyBottom = enemy.y + (enemyHeight / 2)
+      if (enemyBottom >= gameOverThreshold) {
         this.gameOver()
         return
       }
     }
 
-    // Check if all enemies are destroyed (win condition - optional)
-    const aliveEnemies = this.enemies.filter(e => e.isAlive)
-    if (aliveEnemies.length === 0) {
-      // Player wins - could spawn new wave or end game
-      // For now, we'll just end the game
-      this.gameOver()
-    }
+    // No win condition - enemies keep spawning until player loses all lives
   }
 
   // ========================================
@@ -610,6 +1014,12 @@ class GameScene extends Phaser.Scene {
     const index = this.enemies.indexOf(enemy)
     if (index > -1) {
       this.enemies.splice(index, 1)
+    }
+    
+    // Check if this row still has alive enemies, if not, remove from shooting system
+    const rowHasAliveEnemies = this.enemies.some(e => e.isAlive && e.active && e.row === enemy.row)
+    if (!rowHasAliveEnemies) {
+      this.rowsCanShoot.delete(enemy.row)
     }
 
     // Update score based on enemy type
