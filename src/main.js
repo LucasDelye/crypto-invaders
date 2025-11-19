@@ -1,43 +1,10 @@
 import './style.css'
 import Phaser from 'phaser'
 
-// Function to get current browser dimensions with logging
+// Function to get current browser dimensions
 function getBrowserDimensions() {
   const width = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth
   const height = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight
-  
-  // Comprehensive logging for debugging
-  console.log('=== BROWSER DIMENSION DETECTION ===')
-  console.log('Environment:', {
-    hostname: window.location.hostname,
-    protocol: window.location.protocol,
-    href: window.location.href,
-    userAgent: navigator.userAgent
-  })
-  console.log('Window dimensions:', {
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-    outerWidth: window.outerWidth,
-    outerHeight: window.outerHeight
-  })
-  console.log('Document dimensions:', {
-    documentElementClientWidth: document.documentElement.clientWidth,
-    documentElementClientHeight: document.documentElement.clientHeight,
-    bodyClientWidth: document.body.clientWidth,
-    bodyClientHeight: document.body.clientHeight
-  })
-  console.log('Screen dimensions:', {
-    screenWidth: screen.width,
-    screenHeight: screen.height,
-    availWidth: screen.availWidth,
-    availHeight: screen.availHeight
-  })
-  console.log('Detected game dimensions:', {
-    width: width,
-    height: height
-  })
-  console.log('===================================')
-  
   return { width, height }
 }
 
@@ -55,14 +22,6 @@ function updateDimensions() {
   scaleX = sizes.width / 1080
   scaleY = sizes.height / 1920
   scale = Math.min(scaleX, scaleY)
-  
-  console.log('Updated dimensions and scale:', {
-    width: sizes.width,
-    height: sizes.height,
-    scaleX: scaleX,
-    scaleY: scaleY,
-    scale: scale
-  })
 }
 
 // Game parameters
@@ -155,41 +114,14 @@ class GameScene extends Phaser.Scene {
     this.load.image('alien', '/assets/alien.png')
     this.load.image('superAlien', '/assets/super_alien.png')
     this.load.image('explosion', '/assets/explosion.png')
-    
-    // Add error handling for asset loading
-    this.load.on('filecomplete', (key, type, data) => {
-      console.log(`Asset loaded successfully: ${key} (${type})`)
-    })
-    
-    this.load.on('loaderror', (file) => {
-      console.error(`Failed to load asset: ${file.key} from ${file.src}`)
-      console.error('Current location:', window.location.href)
-      console.error('Base URL:', document.baseURI)
-    })
   }
 
   create() {
     // Don't pause the scene - control with gameActive instead
     
-    // Log dimensions being used in the scene
-    console.log('=== GAME SCENE CREATE ===')
-    console.log('Scene dimensions:', {
-      sizesWidth: sizes.width,
-      sizesHeight: sizes.height,
-      scale: scale,
-      scaleX: scaleX,
-      scaleY: scaleY,
-      gameWidth: this.scale.width,
-      gameHeight: this.scale.height,
-      cameraWidth: this.cameras.main.width,
-      cameraHeight: this.cameras.main.height
-    })
-    console.log('========================')
-    
     // Ensure physics world has no gravity
     this.physics.world.gravity.y = 0
     this.physics.world.gravity.x = 0
-    console.log('Scene created - Physics world gravity:', this.physics.world.gravity)
     
     this.createBackground()
     this.createPlayer()
@@ -202,39 +134,14 @@ class GameScene extends Phaser.Scene {
   }
 
   createBackground() {
-    // Check if background image is loaded
-    const bgTexture = this.textures.get('bg')
-    if (!bgTexture || !bgTexture.key || bgTexture.key === '__MISSING') {
-      console.error('Background image not loaded! Using fallback black background.')
-      console.error('Available textures:', Object.keys(this.textures.list))
-      this.add.rectangle(0, 0, sizes.width, sizes.height, 0x000000).setOrigin(0, 0)
-      return
-    }
-    
+    // Try to load background image, fallback to black if not available
     try {
       const bg = this.add.image(0, 0, 'bg').setOrigin(0, 0)
-      console.log('Background image loaded:', {
-        textureKey: bgTexture.key,
-        originalWidth: bg.width,
-        originalHeight: bg.height,
-        displayWidth: bg.displayWidth,
-        displayHeight: bg.displayHeight
-      })
-      
       const bgScaleY = sizes.height / bg.height
       const bgScaleX = sizes.width / bg.width
       const bgScale = Math.max(bgScaleX, bgScaleY)
       bg.setScale(bgScale)
-      
-      console.log('Background scaling:', {
-        bgScaleX,
-        bgScaleY,
-        bgScale,
-        finalWidth: bg.displayWidth,
-        finalHeight: bg.displayHeight
-      })
     } catch (e) {
-      console.error('Error creating background image:', e)
       // Fallback to black background
       this.add.rectangle(0, 0, sizes.width, sizes.height, 0x000000).setOrigin(0, 0)
     }
@@ -257,13 +164,6 @@ class GameScene extends Phaser.Scene {
   }
 
   createPlayer() {
-    // Check if player image is loaded
-    const playerTexture = this.textures.get('player')
-    if (!playerTexture || !playerTexture.key || playerTexture.key === '__MISSING') {
-      console.error('Player image not loaded!')
-      console.error('Available textures:', Object.keys(this.textures.list))
-    }
-    
     // Position player at bottom 1/4 of screen (3/4 from top)
     const playerY = sizes.height * 0.75
     this.player = this.physics.add
@@ -271,16 +171,6 @@ class GameScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5)
       .setCollideWorldBounds(true)
       .setScale(scale * 0.75) // Scale relative to resolution
-    
-    console.log('Player created:', {
-      x: this.player.x,
-      y: this.player.y,
-      originalWidth: this.player.width,
-      originalHeight: this.player.height,
-      scale: scale * 0.75,
-      displayWidth: this.player.displayWidth,
-      displayHeight: this.player.displayHeight
-    })
     
     this.player.body.allowGravity = false
   }
@@ -344,13 +234,6 @@ class GameScene extends Phaser.Scene {
       const isSuperAlien = superAlienCols.includes(col)
       const enemyKey = isSuperAlien ? 'superAlien' : 'alien'
       
-      // Check if enemy texture is loaded
-      const enemyTexture = this.textures.get(enemyKey)
-      if (!enemyTexture || !enemyTexture.key || enemyTexture.key === '__MISSING') {
-        console.error(`Enemy image not loaded: ${enemyKey}`)
-        console.error('Available textures:', Object.keys(this.textures.list))
-      }
-      
       // Create image with physics directly
       const enemy = this.physics.add.image(x, y, enemyKey)
         .setOrigin(0.5, 0.5)
@@ -390,13 +273,6 @@ class GameScene extends Phaser.Scene {
       // Determine if this is a super alien - check if col is in superAlienCols array
       const isSuperAlien = superAlienCols.includes(col)
       const enemyKey = isSuperAlien ? 'superAlien' : 'alien'
-      
-      // Check if enemy texture is loaded
-      const enemyTexture = this.textures.get(enemyKey)
-      if (!enemyTexture || !enemyTexture.key || enemyTexture.key === '__MISSING') {
-        console.error(`Enemy image not loaded: ${enemyKey}`)
-        console.error('Available textures:', Object.keys(this.textures.list))
-      }
       
       // Create image with physics directly
       const enemy = this.physics.add.image(x, y, enemyKey)
@@ -487,13 +363,11 @@ class GameScene extends Phaser.Scene {
     this.powerUpEndTime = this.time.now + POWERUP_DURATION
     
     // Visual feedback (optional - could add sound or text here)
-    console.log('Power-up collected! Double shot activated for 10 seconds')
   }
 
   checkPowerUpExpiration() {
     if (this.playerDoubleShot && this.time.now >= this.powerUpEndTime) {
       this.playerDoubleShot = false
-      console.log('Double shot power-up expired')
     }
   }
 
@@ -1168,32 +1042,25 @@ class GameScene extends Phaser.Scene {
   }
 
   hitPlayer(bullet, player) {
-    console.log('[hitPlayer] Called - lives:', this.lives, 'bullet.active:', bullet?.active, 'this.player exists:', !!this.player, 'processing:', this.playerHitProcessing)
-    
     // Prevent multiple simultaneous hits
     if (this.playerHitProcessing) {
-      console.log('[hitPlayer] Already processing hit, returning')
       return
     }
     
     // Check if bullet is valid
     if (!bullet || !bullet.active) {
-      console.log('[hitPlayer] Bullet invalid, returning')
       return
     }
     // Check if player exists and has lives left
     if (!this.player) {
-      console.log('[hitPlayer] this.player is null, returning')
       return
     }
     if (this.lives <= 0) {
-      console.log('[hitPlayer] Lives <= 0, returning')
       return
     }
     
     // Set processing flag IMMEDIATELY to prevent multiple calls
     this.playerHitProcessing = true
-    console.log('[hitPlayer] Processing hit - current lives:', this.lives)
 
     // Store THIS player state before destroying bullet (this.player is the actual displayed sprite)
     const playerWasVisible = this.player.visible
@@ -1236,7 +1103,6 @@ class GameScene extends Phaser.Scene {
           null,
           this
         )
-        console.log('[hitPlayer] Re-added player to scene and re-setup overlap')
       }
     }
     
@@ -1246,33 +1112,23 @@ class GameScene extends Phaser.Scene {
     if (this.player.body) {
       this.player.body.enable = true
     }
-    console.log('[hitPlayer] After restore - player.visible:', this.player.visible, 'player.active:', this.player.active)
 
     // Create explosion particle effect at player position
-    console.log('[hitPlayer] Creating explosion at:', playerX, playerY)
     this.createExplosion(playerX, playerY)
-    console.log('[hitPlayer] Explosion created')
 
     // Reduce lives
-    console.log('[hitPlayer] Before lives reduction - lives:', this.lives)
     this.lives--
-    console.log('[hitPlayer] After lives reduction - lives:', this.lives)
     this.updateLives()
-    console.log('[hitPlayer] Lives updated in UI')
 
     // Check if game over
     if (this.lives <= 0) {
-      console.log('[hitPlayer] Game over - calling gameOver()')
       this.gameOver()
     }
     
     // Reset processing flag after a longer delay to prevent rapid multiple hits
     this.time.delayedCall(500, () => {
       this.playerHitProcessing = false
-      console.log('[hitPlayer] Processing flag reset')
     })
-    
-    console.log('[hitPlayer] Function complete')
   }
 
   // ========================================
@@ -1327,15 +1183,8 @@ function initializeGame() {
   // Get canvas element
   const gameCanvas = document.querySelector('#gameCanvas')
   if (!gameCanvas) {
-    console.error('Game canvas not found!')
     return
   }
-  
-  console.log('Initializing Phaser game with dimensions:', {
-    width: sizes.width,
-    height: sizes.height,
-    canvasElement: gameCanvas
-  })
   
   const config = {
     type: Phaser.WEBGL,
@@ -1359,13 +1208,6 @@ function initializeGame() {
   
   game.events.once('ready', () => {
     gameScene = game.scene.getScene('gameScene')
-    console.log('Game ready, scene:', gameScene)
-    console.log('Game canvas actual size:', {
-      canvasWidth: gameCanvas.width,
-      canvasHeight: gameCanvas.height,
-      canvasClientWidth: gameCanvas.clientWidth,
-      canvasClientHeight: gameCanvas.clientHeight
-    })
   })
   
   // Also try to get scene immediately if available
@@ -1375,9 +1217,8 @@ function initializeGame() {
   
   // Handle window resize events
   window.addEventListener('resize', () => {
-    console.log('Window resize detected - updating dimensions')
     updateDimensions()
-    // Note: Phaser doesn't automatically resize, but we log for debugging
+    // Note: Phaser doesn't automatically resize
     // If dynamic resizing is needed, we can add game.scale.resize() here
   })
   
@@ -1393,11 +1234,6 @@ function initGameWhenReady() {
   // This ensures we have the most up-to-date viewport size
   updateDimensions()
   
-  console.log('Initializing game with final dimensions:', {
-    width: sizes.width,
-    height: sizes.height
-  })
-  
   const result = initializeGame()
   if (result) {
     game = result.game
@@ -1408,22 +1244,18 @@ function initGameWhenReady() {
 if (document.readyState === 'loading') {
   // Wait for DOM to be ready
   document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM Content Loaded - initializing game')
     // Use a small delay to ensure viewport is fully calculated
     setTimeout(initGameWhenReady, 100)
   })
   
   // Also listen for window load as a fallback (ensures all resources loaded)
   window.addEventListener('load', () => {
-    console.log('Window loaded - checking if game initialized')
     if (!game) {
-      console.log('Game not yet initialized, initializing now')
       initGameWhenReady()
     }
   })
 } else {
   // DOM is already ready
-  console.log('DOM already ready - initializing game')
   // Use a small delay to ensure viewport is fully calculated
   setTimeout(initGameWhenReady, 100)
 }
@@ -1432,7 +1264,6 @@ if (document.readyState === 'loading') {
 // Wait for DOM to ensure elements are available
 function setupGameStartButton() {
   if (!gameStartBtn) {
-    console.error('Game start button not found!')
     return
   }
   
