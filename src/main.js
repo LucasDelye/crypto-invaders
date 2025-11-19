@@ -1,15 +1,69 @@
 import './style.css'
 import Phaser from 'phaser'
 
-const sizes = {
-  width: window.innerWidth,
-  height: window.innerHeight
+// Function to get current browser dimensions with logging
+function getBrowserDimensions() {
+  const width = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth
+  const height = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight
+  
+  // Comprehensive logging for debugging
+  console.log('=== BROWSER DIMENSION DETECTION ===')
+  console.log('Environment:', {
+    hostname: window.location.hostname,
+    protocol: window.location.protocol,
+    href: window.location.href,
+    userAgent: navigator.userAgent
+  })
+  console.log('Window dimensions:', {
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    outerWidth: window.outerWidth,
+    outerHeight: window.outerHeight
+  })
+  console.log('Document dimensions:', {
+    documentElementClientWidth: document.documentElement.clientWidth,
+    documentElementClientHeight: document.documentElement.clientHeight,
+    bodyClientWidth: document.body.clientWidth,
+    bodyClientHeight: document.body.clientHeight
+  })
+  console.log('Screen dimensions:', {
+    screenWidth: screen.width,
+    screenHeight: screen.height,
+    availWidth: screen.availWidth,
+    availHeight: screen.availHeight
+  })
+  console.log('Detected game dimensions:', {
+    width: width,
+    height: height
+  })
+  console.log('===================================')
+  
+  return { width, height }
 }
 
+// Initialize sizes - will be updated when DOM is ready
+let sizes = getBrowserDimensions()
+
 // Calculate scaling factors based on original 1080x1920 resolution
-const scaleX = sizes.width / 1080
-const scaleY = sizes.height / 1920
-const scale = Math.min(scaleX, scaleY) // Use the smaller scale to maintain aspect ratio
+let scaleX = sizes.width / 1080
+let scaleY = sizes.height / 1920
+let scale = Math.min(scaleX, scaleY) // Use the smaller scale to maintain aspect ratio
+
+// Function to update dimensions and scale
+function updateDimensions() {
+  sizes = getBrowserDimensions()
+  scaleX = sizes.width / 1080
+  scaleY = sizes.height / 1920
+  scale = Math.min(scaleX, scaleY)
+  
+  console.log('Updated dimensions and scale:', {
+    width: sizes.width,
+    height: sizes.height,
+    scaleX: scaleX,
+    scaleY: scaleY,
+    scale: scale
+  })
+}
 
 // Game parameters
 const PLAYER_SPEED = 300
@@ -101,6 +155,21 @@ class GameScene extends Phaser.Scene {
 
   create() {
     // Don't pause the scene - control with gameActive instead
+    
+    // Log dimensions being used in the scene
+    console.log('=== GAME SCENE CREATE ===')
+    console.log('Scene dimensions:', {
+      sizesWidth: sizes.width,
+      sizesHeight: sizes.height,
+      scale: scale,
+      scaleX: scaleX,
+      scaleY: scaleY,
+      gameWidth: this.scale.width,
+      gameHeight: this.scale.height,
+      cameraWidth: this.cameras.main.width,
+      cameraHeight: this.cameras.main.height
+    })
+    console.log('========================')
     
     // Ensure physics world has no gravity
     this.physics.world.gravity.y = 0
@@ -1178,75 +1247,171 @@ class GameScene extends Phaser.Scene {
   }
 }
 
-const config = {
-  type: Phaser.WEBGL,
-  width: sizes.width,
-  height: sizes.height,
-  canvas: gameCanvas,
-  physics: {
-    default: 'arcade',
-    arcade: {
-      gravity: { y: 0, x: 0 }, // Explicitly set both to 0
-      debug: true // Enable debug to show collision boxes
-    }
-  },
-  scene: [GameScene]
-}
-
-const game = new Phaser.Game(config)
-
-// Get reference to the scene - try multiple ways to ensure we get it
-let gameScene
-
-game.events.once('ready', () => {
-  gameScene = game.scene.getScene('gameScene')
-  console.log('Game ready, scene:', gameScene)
-})
-
-// Also try to get scene immediately if available
-if (game && game.scene) {
-  gameScene = game.scene.getScene('gameScene')
-}
-
-gameStartBtn.addEventListener('click', () => {
-  gameStartDiv.style.display = 'none'
+// Wait for DOM to be ready before initializing game
+// This ensures we get the correct browser dimensions
+function initializeGame() {
+  // Update dimensions right before creating the game
+  updateDimensions()
   
-  // Try to get scene if we don't have it yet
-  if (!gameScene && game && game.scene) {
+  // Get canvas element
+  const gameCanvas = document.querySelector('#gameCanvas')
+  if (!gameCanvas) {
+    console.error('Game canvas not found!')
+    return
+  }
+  
+  console.log('Initializing Phaser game with dimensions:', {
+    width: sizes.width,
+    height: sizes.height,
+    canvasElement: gameCanvas
+  })
+  
+  const config = {
+    type: Phaser.WEBGL,
+    width: sizes.width,
+    height: sizes.height,
+    canvas: gameCanvas,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0, x: 0 }, // Explicitly set both to 0
+        debug: true // Enable debug to show collision boxes
+      }
+    },
+    scene: [GameScene]
+  }
+  
+  const game = new Phaser.Game(config)
+  
+  // Get reference to the scene - try multiple ways to ensure we get it
+  let gameScene
+  
+  game.events.once('ready', () => {
+    gameScene = game.scene.getScene('gameScene')
+    console.log('Game ready, scene:', gameScene)
+    console.log('Game canvas actual size:', {
+      canvasWidth: gameCanvas.width,
+      canvasHeight: gameCanvas.height,
+      canvasClientWidth: gameCanvas.clientWidth,
+      canvasClientHeight: gameCanvas.clientHeight
+    })
+  })
+  
+  // Also try to get scene immediately if available
+  if (game && game.scene) {
     gameScene = game.scene.getScene('gameScene')
   }
   
-  if (gameScene) {
-    // Set game active - this will allow update loop to run
-    gameScene.gameActive = true
-    
-    // Ensure physics is running
-    if (gameScene.physics && gameScene.physics.world) {
-      gameScene.physics.world.resume()
-    }
-    
-    // Initialize enemy and player shoot timers when game starts
-    if (gameScene.time) {
-      gameScene.enemyShootTimer = gameScene.time.now - ENEMY_SHOOT_INTERVAL + 1000
-      gameScene.playerShootTimer = gameScene.time.now
-    }
-    
-    // Set enemy velocities immediately - only horizontal, no vertical
-    if (gameScene.enemies && gameScene.enemies.length > 0) {
-      gameScene.enemies.forEach((enemy) => {
-        if (enemy.isAlive && enemy.body) {
-          // Ensure body is enabled
-          if (!enemy.body.enable) {
-            enemy.body.enable = true
-          }
-          
-          // Set velocity using sprite methods (same as in handleEnemyMovement)
-          enemy.setVelocityX(gameScene.enemyDirection * gameScene.enemySpeed)
-          enemy.setVelocityY(0) // Ensure no vertical movement
-        }
-      })
-    }
+  // Handle window resize events
+  window.addEventListener('resize', () => {
+    console.log('Window resize detected - updating dimensions')
+    updateDimensions()
+    // Note: Phaser doesn't automatically resize, but we log for debugging
+    // If dynamic resizing is needed, we can add game.scale.resize() here
+  })
+  
+  return { game, gameScene }
+}
+
+// Initialize game when DOM is ready
+// Use multiple strategies to ensure we get correct dimensions
+let game, gameScene
+
+function initGameWhenReady() {
+  // Update dimensions one more time right before initialization
+  // This ensures we have the most up-to-date viewport size
+  updateDimensions()
+  
+  console.log('Initializing game with final dimensions:', {
+    width: sizes.width,
+    height: sizes.height
+  })
+  
+  const result = initializeGame()
+  if (result) {
+    game = result.game
+    gameScene = result.gameScene
   }
-})
+}
+
+if (document.readyState === 'loading') {
+  // Wait for DOM to be ready
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM Content Loaded - initializing game')
+    // Use a small delay to ensure viewport is fully calculated
+    setTimeout(initGameWhenReady, 100)
+  })
+  
+  // Also listen for window load as a fallback (ensures all resources loaded)
+  window.addEventListener('load', () => {
+    console.log('Window loaded - checking if game initialized')
+    if (!game) {
+      console.log('Game not yet initialized, initializing now')
+      initGameWhenReady()
+    }
+  })
+} else {
+  // DOM is already ready
+  console.log('DOM already ready - initializing game')
+  // Use a small delay to ensure viewport is fully calculated
+  setTimeout(initGameWhenReady, 100)
+}
+
+// Set up game start button event listener
+// Wait for DOM to ensure elements are available
+function setupGameStartButton() {
+  if (!gameStartBtn) {
+    console.error('Game start button not found!')
+    return
+  }
+  
+  gameStartBtn.addEventListener('click', () => {
+    gameStartDiv.style.display = 'none'
+    
+    // Try to get scene if we don't have it yet
+    if (!gameScene && game && game.scene) {
+      gameScene = game.scene.getScene('gameScene')
+    }
+    
+    if (gameScene) {
+      // Set game active - this will allow update loop to run
+      gameScene.gameActive = true
+      
+      // Ensure physics is running
+      if (gameScene.physics && gameScene.physics.world) {
+        gameScene.physics.world.resume()
+      }
+      
+      // Initialize enemy and player shoot timers when game starts
+      if (gameScene.time) {
+        gameScene.enemyShootTimer = gameScene.time.now - ENEMY_SHOOT_INTERVAL + 1000
+        gameScene.playerShootTimer = gameScene.time.now
+      }
+      
+      // Set enemy velocities immediately - only horizontal, no vertical
+      if (gameScene.enemies && gameScene.enemies.length > 0) {
+        gameScene.enemies.forEach((enemy) => {
+          if (enemy.isAlive && enemy.body) {
+            // Ensure body is enabled
+            if (!enemy.body.enable) {
+              enemy.body.enable = true
+            }
+            
+            // Set velocity using sprite methods (same as in handleEnemyMovement)
+            enemy.setVelocityX(gameScene.enemyDirection * gameScene.enemySpeed)
+            enemy.setVelocityY(0) // Ensure no vertical movement
+          }
+        })
+      }
+    }
+  })
+}
+
+// Set up event listener when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', setupGameStartButton)
+} else {
+  setupGameStartButton()
+}
 
 
