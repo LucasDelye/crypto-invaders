@@ -143,14 +143,29 @@ class GameScene extends Phaser.Scene {
   // ========================================
   
   preload() {
+    // In Vite, files in the 'public' folder are served from root
+    // So '/public/assets/...' should be '/assets/...'
+    // This works in both development and production builds
+    
     // Load background
-    this.load.image('bg', '/public/assets/cryptoBgd.png')
+    this.load.image('bg', '/assets/cryptoBgd.png')
     
     // Load game sprites
-    this.load.image('player', '/public/assets/player.png')
-    this.load.image('alien', '/public/assets/alien.png')
-    this.load.image('superAlien', '/public/assets/super_alien.png')
-    this.load.image('explosion', '/public/assets/explosion.png')
+    this.load.image('player', '/assets/player.png')
+    this.load.image('alien', '/assets/alien.png')
+    this.load.image('superAlien', '/assets/super_alien.png')
+    this.load.image('explosion', '/assets/explosion.png')
+    
+    // Add error handling for asset loading
+    this.load.on('filecomplete', (key, type, data) => {
+      console.log(`Asset loaded successfully: ${key} (${type})`)
+    })
+    
+    this.load.on('loaderror', (file) => {
+      console.error(`Failed to load asset: ${file.key} from ${file.src}`)
+      console.error('Current location:', window.location.href)
+      console.error('Base URL:', document.baseURI)
+    })
   }
 
   create() {
@@ -187,14 +202,39 @@ class GameScene extends Phaser.Scene {
   }
 
   createBackground() {
-    // Try to load background image, fallback to black if not available
+    // Check if background image is loaded
+    const bgTexture = this.textures.get('bg')
+    if (!bgTexture || !bgTexture.key || bgTexture.key === '__MISSING') {
+      console.error('Background image not loaded! Using fallback black background.')
+      console.error('Available textures:', Object.keys(this.textures.list))
+      this.add.rectangle(0, 0, sizes.width, sizes.height, 0x000000).setOrigin(0, 0)
+      return
+    }
+    
     try {
       const bg = this.add.image(0, 0, 'bg').setOrigin(0, 0)
+      console.log('Background image loaded:', {
+        textureKey: bgTexture.key,
+        originalWidth: bg.width,
+        originalHeight: bg.height,
+        displayWidth: bg.displayWidth,
+        displayHeight: bg.displayHeight
+      })
+      
       const bgScaleY = sizes.height / bg.height
       const bgScaleX = sizes.width / bg.width
       const bgScale = Math.max(bgScaleX, bgScaleY)
       bg.setScale(bgScale)
+      
+      console.log('Background scaling:', {
+        bgScaleX,
+        bgScaleY,
+        bgScale,
+        finalWidth: bg.displayWidth,
+        finalHeight: bg.displayHeight
+      })
     } catch (e) {
+      console.error('Error creating background image:', e)
       // Fallback to black background
       this.add.rectangle(0, 0, sizes.width, sizes.height, 0x000000).setOrigin(0, 0)
     }
@@ -217,6 +257,13 @@ class GameScene extends Phaser.Scene {
   }
 
   createPlayer() {
+    // Check if player image is loaded
+    const playerTexture = this.textures.get('player')
+    if (!playerTexture || !playerTexture.key || playerTexture.key === '__MISSING') {
+      console.error('Player image not loaded!')
+      console.error('Available textures:', Object.keys(this.textures.list))
+    }
+    
     // Position player at bottom 1/4 of screen (3/4 from top)
     const playerY = sizes.height * 0.75
     this.player = this.physics.add
@@ -224,6 +271,16 @@ class GameScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5)
       .setCollideWorldBounds(true)
       .setScale(scale * 0.75) // Scale relative to resolution
+    
+    console.log('Player created:', {
+      x: this.player.x,
+      y: this.player.y,
+      originalWidth: this.player.width,
+      originalHeight: this.player.height,
+      scale: scale * 0.75,
+      displayWidth: this.player.displayWidth,
+      displayHeight: this.player.displayHeight
+    })
     
     this.player.body.allowGravity = false
   }
@@ -287,6 +344,13 @@ class GameScene extends Phaser.Scene {
       const isSuperAlien = superAlienCols.includes(col)
       const enemyKey = isSuperAlien ? 'superAlien' : 'alien'
       
+      // Check if enemy texture is loaded
+      const enemyTexture = this.textures.get(enemyKey)
+      if (!enemyTexture || !enemyTexture.key || enemyTexture.key === '__MISSING') {
+        console.error(`Enemy image not loaded: ${enemyKey}`)
+        console.error('Available textures:', Object.keys(this.textures.list))
+      }
+      
       // Create image with physics directly
       const enemy = this.physics.add.image(x, y, enemyKey)
         .setOrigin(0.5, 0.5)
@@ -326,6 +390,13 @@ class GameScene extends Phaser.Scene {
       // Determine if this is a super alien - check if col is in superAlienCols array
       const isSuperAlien = superAlienCols.includes(col)
       const enemyKey = isSuperAlien ? 'superAlien' : 'alien'
+      
+      // Check if enemy texture is loaded
+      const enemyTexture = this.textures.get(enemyKey)
+      if (!enemyTexture || !enemyTexture.key || enemyTexture.key === '__MISSING') {
+        console.error(`Enemy image not loaded: ${enemyKey}`)
+        console.error('Available textures:', Object.keys(this.textures.list))
+      }
       
       // Create image with physics directly
       const enemy = this.physics.add.image(x, y, enemyKey)
